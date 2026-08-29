@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ambient Swirl Background — Preview</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #05070d; overflow: hidden; }
+
+  #ambient-bg {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    display: block;
+    z-index: -1;
+    background: #05070d;
+  }
+
+  .demo-content {
+    position: relative;
+    z-index: 1;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #eef2ff;
+    font-family: system-ui, -apple-system, sans-serif;
+    text-align: center;
+  }
+
+  .demo-content h1 { font-size: 2.4rem; font-weight: 600; margin: 0 0 .5rem; letter-spacing: .02em; }
+  .demo-content p  { opacity: .65; font-size: 1rem; max-width: 32rem; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<canvas id="ambient-bg"></canvas>
+
+<div class="demo-content">
+  <h1>Ambient Swirl Background</h1>
+  <p>This canvas sits fixed behind your content at z-index -1. Scroll, resize, or just watch the flow field drift.</p>
+</div>
+
+<script type="module">
+import { createNoise2D } from "https://cdn.jsdelivr.net/npm/simplex-noise@4.0.3/dist/esm/simplex-noise.js";
+
+const canvas = document.getElementById("ambient-bg");
+const ctx = canvas.getContext("2d");
+const noise2D = createNoise2D();
+
+const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+let width, height, dpr;
+let particles = [];
+
+// Tune these to taste
+const CONFIG = {
+  particleCount: window.innerWidth < 700 ? 250 : 550,
+  noiseScale: 0.0018,     // spatial frequency of the flow field
+  noiseSteps: 6,          // "banding" — higher = more distinct angle bands
+  timeScale: 0.00012,     // how fast the field evolves
+  speed: 1.4,             // particle travel speed
+  fadeAlpha: 0.045,       // trail persistence (lower = longer trails)
+  lineWidth: 1,
+  hueBase: 225,           // base hue (blue/violet)
+  hueRange: 60,
+};
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  width = window.innerWidth;
+  height = window.innerHeight;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = width + "px";
+  canvas.style.height = height + "px";
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // reset the canvas to solid background on resize so old frames don't stretch
+  ctx.fillStyle = "#05070d";
+  ctx.fillRect(0, 0, width, height);
+}
+
+function makeParticle() {
+  return {
+    x: Math.random() * width,
+    y: Math.random() * height,
+    life: Math.random() * 200 + 100,
+    age: 0,
+  };
+}
+
+function initParticles() {
+  particles = Array.from({ length: CONFIG.particleCount }, makeParticle);
+}
+
+function angleAt(x, y, t) {
+  const n = noise2D(x * CONFIG.noiseScale, y * CONFIG.noiseScale + t);
+  // quantize into bands, then convert to an angle in radians
+  const banded = Math.floor(n * CONFIG.noiseSteps) / CONFIG.noiseSteps;
+  return banded * Math.PI * 2;
+}
+
+function step(t) {
+  // translucent fill instead of clear -> leaves fading trails
+  ctx.fillStyle = `rgba(5, 7, 13, ${CONFIG.fadeAlpha})`;
+  ctx.fillRect(0, 0, width, height);
+  ctx.lineWidth = CONFIG.lineWidth;
+  ctx.lineCap = "round";
+
+  for (const p of particles) {
+    const angle = angleAt(p.x, p.y, t * CONFIG.timeScale);
+    const nx = p.x + Math.cos(angle) * CONFIG.speed;
+    const ny = p.y + Math.sin(angle) * CONFIG.speed;
+
+    const hue = CONFIG.hueBase + Math.sin(angle) * CONFIG.hueRange;
+    ctx.strokeStyle = `hsla(${hue}, 85%, 68%, 0.5)`;
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(nx, ny);
+    ctx.stroke();
+
+    p.x = nx;
+    p.y = ny;
+    p.age++;
+
+    // recycle particles that wander off-screen or age out
+    if (p.age > p.life || p.x < 0 || p.x > width || p.y < 0 || p.y > height) {
+      Object.assign(p, makeParticle(), { x: Math.random() * width, y: Math.random() * height });
+    }
+  }
+}
+
+let raf;
+function loop(t) {
+  step(t);
+  raf = requestAnimationFrame(loop);
+}
+
+function start() {
+  resize();
+  initParticles();
+  if (!reduceMotion) {
+    raf = requestAnimationFrame(loop);
+  } else {
+    // draw a single static-ish frame for reduced-motion users
+    step(0);
+  }
+}
+
+window.addEventListener("resize", () => {
+  cancelAnimationFrame(raf);
+  resize();
+  initParticles();
+  if (!reduceMotion) raf = requestAnimationFrame(loop);
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    cancelAnimationFrame(raf);
+  } else if (!reduceMotion) {
+    raf = requestAnimationFrame(loop);
+  }
+});
+
+start();
+</script>
+</body>
+</html>
